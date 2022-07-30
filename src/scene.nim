@@ -1,22 +1,19 @@
-import lightsource
+import color
 import geometry
 import ray
 import vec3
 import camera
+import material
 import mesh
-import std/[options, random, strformat]
-from std/math import sqrt
+import std/[options, sugar, random, strformat, threadpool]
+from std/math import sqrt, ceilDiv
 
 type Scene* = ref object
   camera*: Camera
   meshes*: seq[Mesh]
-  lights*: seq[LightSource]
 
 func add*(scene: Scene, mesh: Mesh): void =
   scene.meshes.add(mesh)
-
-func add*(scene: Scene, light: LightSource): void =
-  scene.lights.add(light)
 
 proc castRay*(scene: Scene, ray: Ray, depth: Natural = 50): Color =
   if depth <= 0: return black
@@ -25,7 +22,7 @@ proc castRay*(scene: Scene, ray: Ray, depth: Natural = 50): Color =
   var closestIndex = -1
 
   for i, mesh in scene.meshes:
-    let inter = mesh.geometry(ray)
+    let inter = mesh.geometry.intersect(ray)
     if inter.isSome:
       let ter = inter.unsafeGet
       if ter.t < closestInter.t and ter.t >= 0.001:
@@ -48,26 +45,54 @@ proc castRay*(scene: Scene, ray: Ray, depth: Natural = 50): Color =
 
 const log = true
 
-proc render*(scene: Scene, width, height: Natural, camera: Vec3,
-    samples: Positive = 100): seq[byte] =
-  result = newSeqUninitialized[byte](width * height * 3)
-  var i = 0
+proc renderInThread(scene: Scene, width, height: Natural, seed: int64,
+    pixels: ptr seq[float], samples: Positive, id: Positive): void {.gcsafe.} =
+  var prng = initRand(seed)
   let invWidth = 1.0 / float(width)
   let invHeight = 1.0 / float(height)
-  let invSamples = 1.0 / float(samples)
+  var i = 0
 
-  for y in countdown(height - 1, 0):
-    when log: echo fmt"{height - y} / {height}"
-    for x in 0..<width:
+  for x in 0..<width:
+    for y in 0..<height:
       var averageColor = rgb(0.0, 0.0, 0.0)
       for _ in 0..<samples:
-        let u = (float(x) + rand(1.0)) * invWidth
-        let v = (float(y) + rand(1.0)) * invHeight
+        let u = (float(x) + prng.rand(1.0)) * invWidth
+        let v = (float(y) + prng.rand(1.0)) * invHeight
         let ray = scene.camera.rayAt(u, v)
         averageColor += scene.castRay(ray)
 
-      # gamma correction
-      result[i + 0] = byte(sqrt(averageColor.r * invSamples) * 255.0)
-      result[i + 1] = byte(sqrt(averageColor.g * invSamples) * 255.0)
-      result[i + 2] = byte(sqrt(averageColor.b * invSamples) * 255.0)
+      pixels[i + 0] += averageColor.r
+      pixels[i + 1] += averageColor.g
+      pixels[i + 2] += averageColor.b
       i += 3
+
+  when log: echo fmt"run {id} finished"
+
+proc render*(scene: Scene, width, height: Natural, draw: (
+    x: Natural, y: Natural, r: float, g: float, b: float) -> void,
+        samples: Positive = 100, prng: var Rand,
+            samplesPerThread: Positive = 1): void =
+  let runs = samples.ceilDiv(samplesPerThread)
+  let invTotalRuns = 1.0 / float(runs * samplesPerThread)
+  var pixels = newSeq[float](width * height * 3)
+
+  when log: echo fmt"Launching {runs} runs"
+
+  for id in 1..runs:
+    spawn scene.renderInThread(width, height, prng.rand(high(int64)),
+        pixels.addr, samplesPerThread, id)
+
+  sync()
+
+  var i = 0
+
+  for x in 0..<width:
+    for y in 0..<height:
+      # gamma correction
+      let r = sqrt(pixels[i + 0] * invTotalRuns)
+      let g = sqrt(pixels[i + 1] * invTotalRuns)
+      let b = sqrt(pixels[i + 2] * invTotalRuns)
+
+      draw(x, y, r, g, b)
+      i += 3
+
