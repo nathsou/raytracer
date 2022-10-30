@@ -55,34 +55,6 @@ proc randomScene(r: var Rand): seq[Mesh] =
       initMetal(rgb(0.7, 0.6, 0.5), 0.0)
     ))
 
-proc defaultScene2(r: var Rand): seq[Mesh] =
-  result = newSeq[Mesh]()
-
-  result.add initMesh(
-    initSphere(vec3(0.0, -100.5, -1.0), 100.0),
-    initLambertian(rgb(0.8, 0.8, 0.0))
-  )
-
-  result.add initMesh(
-    initSphere(vec3(0.0, 0.0, -1.0), 0.5),
-    initLambertian(rgb(0.1, 0.2, 0.5))
-  )
-
-  result.add initMesh(
-    initSphere(vec3(-1.0, 0.0, -1.0), 0.5),
-    initDielectric(1.5)
-  )
-
-  result.add initMesh(
-    initSphere(vec3(-1.0, 0.0, -1.0), -0.45),
-    initDielectric(1.5)
-  )
-
-  result.add initMesh(
-    initSphere(vec3(1.0, 0.0, -1.0), 0.5),
-    initMetal(rgb(0.8, 0.6, 0.2), fuzziness = 0.0)
-  )
-
 when isMainModule:
   var prng = initRand(11101998)
   let sc = Scene(
